@@ -266,6 +266,53 @@ body {
     color: white;
 }
 
+.map-layer-selector {
+    position: relative;
+}
+
+.layer-menu {
+    position: absolute;
+    bottom: calc(100% + 0.5rem);
+    left: 0;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: blur(12px);
+    border-radius: 12px;
+    padding: 0.5rem;
+    min-width: 150px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    z-index: 1001;
+}
+
+.layer-option {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    background: transparent;
+    border: none;
+    color: var(--text-main);
+    cursor: pointer;
+    border-radius: 8px;
+    transition: all 0.2s;
+    font-size: 0.9rem;
+    text-align: left;
+}
+
+.layer-option:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.layer-option.active {
+    background: rgba(129, 140, 248, 0.2);
+    color: var(--accent-color);
+}
+
+.layer-option .material-icons-round {
+    font-size: 1.2rem;
+}
+
 .primary-btn {
     background: var(--primary-gradient);
     border: none;
@@ -544,4 +591,161 @@ body {
 .spin {
     animation: spin 1s linear infinite;
     display: block;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .floating-header {
+        top: 0.75rem;
+        padding: 0.5rem 1rem;
+    }
+    
+    .floating-header h1 {
+        font-size: 1.1rem;
+    }
+    
+    .split-view {
+        flex-direction: column;
+    }
+    
+    .pane {
+        border-right: none;
+        border-bottom: 1px solid var(--glass-border);
+    }
+    
+    .pane:last-child {
+        border-bottom: none;
+    }
+    
+    .controls {
+        bottom: 1rem;
+        left: 0.5rem;
+        right: 0.5rem;
+        transform: none;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        padding: 0.5rem;
+        border-radius: 16px;
+        max-width: 100%;
+    }
+    
+    .primary-btn {
+        flex: 1;
+        min-width: 120px;
+        padding: 0 1rem;
+        font-size: 0.85rem;
+    }
+    
+    .icon-btn {
+        width: 40px;
+        height: 40px;
+    }
+    
+    .glass-select {
+        font-size: 0.8rem;
+        padding: 0.4rem 0.75rem;
+    }
+    
+    .legend-panel {
+        top: 4rem;
+        right: 0.5rem;
+        left: 0.5rem;
+        width: auto;
+        max-width: none;
+        max-height: 50vh;
+    }
+    
+    .stats-panel {
+        top: 4rem;
+        left: 0.5rem;
+        right: 0.5rem;
+        width: auto;
+        max-width: none;
+        max-height: 60vh;
+    }
+    
+    .back-btn {
+        top: 4rem;
+        left: 0.5rem;
+        padding: 0.5rem 1rem;
+        font-size: 0.85rem;
+    }
+    
+    .map-layer-selector {
+        position: relative;
+    }
+    
+    .layer-menu {
+        bottom: calc(100% + 0.25rem);
+        left: auto;
+        right: 0;
+        min-width: 130px;
+    }
+}
+
+@media (max-width: 480px) {
+    .floating-header {
+        padding: 0.4rem 0.75rem;
+    }
+    
+    .floating-header h1 {
+        font-size: 0.95rem;
+    }
+    
+    .controls {
+        bottom: 0.5rem;
+        left: 0.25rem;
+        right: 0.25rem;
+        padding: 0.4rem;
+    }
+    
+    .primary-btn {
+        font-size: 0.75rem;
+        padding: 0 0.75rem;
+    }
+    
+    .primary-btn .material-icons-round {
+        font-size: 1rem;
+    }
+    
+    .icon-btn {
+        width: 36px;
+        height: 36px;
+    }
+    
+    .icon-btn .material-icons-round {
+        font-size: 1.1rem;
+    }
+    
+    .glass-select {
+        font-size: 0.75rem;
+        padding: 0.35rem 0.5rem;
+    }
+    
+    .legend-panel,
+    .stats-panel {
+        top: 3.5rem;
+        max-height: 45vh;
+    }
+    
+    .back-btn {
+        top: 3.5rem;
+        padding: 0.4rem 0.75rem;
+        font-size: 0.75rem;
+    }
+}
+
+/* Tablet */
+@media (min-width: 769px) and (max-width: 1024px) {
+    .controls {
+        bottom: 1.5rem;
+    }
+    
+    .legend-panel {
+        width: 260px;
+    }
+    
+    .stats-panel {
+        width: 360px;
+    }
 }

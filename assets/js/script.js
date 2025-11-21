@@ -5,13 +5,43 @@ document.addEventListener('DOMContentLoaded', () => {
     const mapAfter = L.map('map-after', mapOptions).setView([20, 0], 2);
     let mapChange = null; // Will be initialized when needed
 
-    const tileUrl = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
-    const attribution = '&copy; OpenStreetMap &copy; CARTO';
+    // --- Basemap Layer Definitions ---
+    const basemapLayers = {
+        dark: {
+            url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+            attribution: '&copy; OpenStreetMap &copy; CARTO'
+        },
+        light: {
+            url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+            attribution: '&copy; OpenStreetMap &copy; CARTO'
+        },
+        satellite: {
+            url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+            attribution: '&copy; Esri &copy; Maxar, GeoEye, Earthstar Geographics, CNES/Airbus DS, USDA, USGS, AeroGRID, IGN, and the GIS User Community'
+        }
+    };
 
-    L.tileLayer(tileUrl, { attribution }).addTo(mapBefore);
-    L.tileLayer(tileUrl, { attribution }).addTo(mapAfter);
+    // Initialize with dark basemap
+    let currentBasemap = 'dark';
+    let beforeTileLayer = L.tileLayer(basemapLayers.dark.url, { attribution: basemapLayers.dark.attribution }).addTo(mapBefore);
+    let afterTileLayer = L.tileLayer(basemapLayers.dark.url, { attribution: basemapLayers.dark.attribution }).addTo(mapAfter);
+    let changeTileLayer = null;
+
     L.control.zoom({ position: 'bottomright' }).addTo(mapBefore);
     L.control.zoom({ position: 'bottomright' }).addTo(mapAfter);
+
+    // Add scale controls to main maps (standard Leaflet scale)
+    L.control.scale({ 
+        position: 'bottomleft',
+        imperial: false,
+        metric: true
+    }).addTo(mapBefore);
+    
+    L.control.scale({ 
+        position: 'bottomleft',
+        imperial: false,
+        metric: true
+    }).addTo(mapAfter);
 
     // --- State Management ---
     const state = {
@@ -29,7 +59,8 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         panels: {
             statsVisible: false
-        }
+        },
+        currentBasemap: 'dark'
     };
 
     const LEGEND_MODES = {
@@ -43,6 +74,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const legendToggleBtn = document.getElementById('legend-toggle-btn');
     const statsToggleBtn = document.getElementById('stats-toggle-btn');
     const downloadReportBtn = document.getElementById('download-report-btn');
+    const mapLayerBtn = document.getElementById('map-layer-btn');
+    const mapLayerMenu = document.getElementById('map-layer-menu');
+    const layerOptions = document.querySelectorAll('.layer-option');
 
     // --- Color Palette ---
     function generateColorPalette(count) {
@@ -83,6 +117,36 @@ document.addEventListener('DOMContentLoaded', () => {
             fillColor: color,
             fillOpacity: 0.5
         };
+    }
+
+    // --- Basemap Layer Switching ---
+    function switchBasemap(layerType) {
+        if (!basemapLayers[layerType] || state.currentBasemap === layerType) return;
+
+        const newLayer = basemapLayers[layerType];
+        state.currentBasemap = layerType;
+
+        // Switch before map
+        mapBefore.removeLayer(beforeTileLayer);
+        beforeTileLayer = L.tileLayer(newLayer.url, { attribution: newLayer.attribution });
+        beforeTileLayer.addTo(mapBefore);
+
+        // Switch after map
+        mapAfter.removeLayer(afterTileLayer);
+        afterTileLayer = L.tileLayer(newLayer.url, { attribution: newLayer.attribution });
+        afterTileLayer.addTo(mapAfter);
+
+        // Switch change map if it exists
+        if (state.change.map && changeTileLayer) {
+            state.change.map.removeLayer(changeTileLayer);
+            changeTileLayer = L.tileLayer(newLayer.url, { attribution: newLayer.attribution });
+            changeTileLayer.addTo(state.change.map);
+        }
+
+        // Update active state in menu
+        layerOptions.forEach(option => {
+            option.classList.toggle('active', option.dataset.layer === layerType);
+        });
     }
 
     // --- Legend ---
@@ -319,6 +383,37 @@ document.addEventListener('DOMContentLoaded', () => {
             if (statsToggleBtn.disabled) return;
             const nextVisibility = !state.panels.statsVisible;
             setStatsPanelVisibility(nextVisibility);
+        });
+    }
+
+    // Map Layer Menu
+    if (mapLayerBtn && mapLayerMenu) {
+        mapLayerBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            mapLayerMenu.classList.toggle('hidden');
+        });
+
+        layerOptions.forEach(option => {
+            option.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const layerType = option.dataset.layer;
+                switchBasemap(layerType);
+                mapLayerMenu.classList.add('hidden');
+            });
+        });
+
+        // Close menu when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!mapLayerBtn.contains(e.target) && !mapLayerMenu.contains(e.target)) {
+                mapLayerMenu.classList.add('hidden');
+            }
+        });
+
+        // Set initial active state
+        layerOptions.forEach(option => {
+            if (option.dataset.layer === state.currentBasemap) {
+                option.classList.add('active');
+            }
         });
     }
 
@@ -611,9 +706,27 @@ document.addEventListener('DOMContentLoaded', () => {
         // Initialize change map if not already done
         if (!mapChange) {
             mapChange = L.map('map-change', mapOptions).setView([20, 0], 2);
-            L.tileLayer(tileUrl, { attribution }).addTo(mapChange);
+            const currentBasemapConfig = basemapLayers[state.currentBasemap];
+            changeTileLayer = L.tileLayer(currentBasemapConfig.url, { attribution: currentBasemapConfig.attribution });
+            changeTileLayer.addTo(mapChange);
             L.control.zoom({ position: 'bottomright' }).addTo(mapChange);
+            
+            // Add scale control to change map
+            L.control.scale({ 
+                position: 'bottomleft',
+                imperial: false,
+                metric: true
+            }).addTo(mapChange);
+            
             state.change.map = mapChange;
+        } else if (changeTileLayer && state.change.map) {
+            // Ensure change map uses current basemap if it already exists
+            const currentBasemapConfig = basemapLayers[state.currentBasemap];
+            if (changeTileLayer._url !== currentBasemapConfig.url) {
+                state.change.map.removeLayer(changeTileLayer);
+                changeTileLayer = L.tileLayer(currentBasemapConfig.url, { attribution: currentBasemapConfig.attribution });
+                changeTileLayer.addTo(state.change.map);
+            }
         }
 
         // Remove existing layer
@@ -688,6 +801,25 @@ document.addEventListener('DOMContentLoaded', () => {
             mapAfter.invalidateSize();
         }, 100);
     });
+
+    // Handle window resize for mobile responsiveness
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+            mapBefore.invalidateSize();
+            mapAfter.invalidateSize();
+            if (mapChange) {
+                mapChange.invalidateSize();
+            }
+        }, 250);
+    });
+
+    // Initial resize check for mobile
+    setTimeout(() => {
+        mapBefore.invalidateSize();
+        mapAfter.invalidateSize();
+    }, 100);
 
     function displayResults(results) {
         const statsContent = document.getElementById('stats-content');
@@ -831,6 +963,27 @@ document.addEventListener('DOMContentLoaded', () => {
         const changedAreaHa = results.changedArea / 10000;
         const sameAreaHa = results.sameArea / 10000;
 
+        // Prepare GeoJSON data for embedding
+        const changeGeoJSON = state.change.geojson || { type: 'FeatureCollection', features: [] };
+        const geoJSONString = JSON.stringify(changeGeoJSON).replace(/</g, '\\u003c');
+        const transitionColorMap = state.transitionColorMap || {};
+
+        // Build legend data for JavaScript
+        const legendData = [
+            { key: '__UNCHANGED__', label: 'Unchanged', color: '#10b981', isDashed: false }
+        ];
+        
+        Object.entries(transitionColorMap).forEach(([transition, color]) => {
+            legendData.push({
+                key: transition,
+                label: transition,
+                color: color,
+                isDashed: false
+            });
+        });
+        
+        const legendDataString = JSON.stringify(legendData).replace(/</g, '\\u003c');
+
         let topChangesHTML = '';
         if (results.changeMatrix && results.changeMatrix.length > 0) {
             topChangesHTML = '<h3>Top Changes (by Area)</h3><div class="table-wrapper"><table><thead><tr><th>#</th><th>Transition</th><th>Area</th><th>% of Changes</th></tr></thead><tbody>';
@@ -855,6 +1008,8 @@ document.addEventListener('DOMContentLoaded', () => {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Change Analysis Report</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
         * {
             margin: 0;
@@ -909,6 +1064,184 @@ document.addEventListener('DOMContentLoaded', () => {
             height: auto;
             border-radius: 8px;
             border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        #interactive-map {
+            width: 100%;
+            height: 600px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            margin-top: 1rem;
+            position: relative;
+        }
+        .leaflet-top.leaflet-right {
+            position: absolute;
+        }
+        .leaflet-control-legend {
+            background: rgba(30, 41, 59, 0.95) !important;
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.2) !important;
+            border-radius: 12px !important;
+            padding: 1rem !important;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5) !important;
+            max-width: 280px;
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+        .legend-header {
+            color: #818cf8;
+            font-weight: 600;
+            margin-bottom: 0.75rem;
+            font-size: 1rem;
+        }
+        .legend-item {
+            display: flex !important;
+            align-items: center !important;
+            gap: 0.75rem !important;
+            padding: 0.5rem !important;
+            margin-bottom: 0.5rem !important;
+            border-radius: 8px !important;
+            cursor: pointer !important;
+            transition: all 0.2s !important;
+            border: 1px solid transparent !important;
+            user-select: none !important;
+            list-style: none !important;
+            -webkit-appearance: none !important;
+            -moz-appearance: none !important;
+            appearance: none !important;
+        }
+        .legend-item:hover {
+            background: rgba(255, 255, 255, 0.1) !important;
+        }
+        .legend-item.active {
+            background: rgba(129, 140, 248, 0.2) !important;
+            border-color: #818cf8 !important;
+        }
+        .legend-color {
+            width: 24px !important;
+            height: 24px !important;
+            border-radius: 4px !important;
+            border: 1px solid rgba(255, 255, 255, 0.3) !important;
+            flex-shrink: 0 !important;
+            display: block !important;
+            -webkit-appearance: none !important;
+            -moz-appearance: none !important;
+            appearance: none !important;
+        }
+        .legend-label {
+            font-size: 0.85rem !important;
+            word-break: break-word !important;
+            color: #f8fafc !important;
+            flex: 1 !important;
+        }
+        .legend-separator {
+            height: 1px !important;
+            background: rgba(255, 255, 255, 0.2) !important;
+            margin: 0.5rem 0 !important;
+            border: none !important;
+            -webkit-appearance: none !important;
+            -moz-appearance: none !important;
+            appearance: none !important;
+        }
+        .legend-dropdown-container {
+            background: rgba(15, 23, 42, 0.6);
+            border-radius: 12px;
+            padding: 0;
+            margin: 1rem 0 2rem 0;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            overflow: hidden;
+        }
+        .legend-dropdown-toggle {
+            width: 100%;
+            padding: 1rem;
+            background: rgba(30, 41, 59, 0.8);
+            border: none;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            color: #f8fafc;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-family: 'Outfit', sans-serif;
+            transition: background 0.2s;
+        }
+        .legend-dropdown-toggle:hover {
+            background: rgba(129, 140, 248, 0.2);
+        }
+        .legend-dropdown-arrow {
+            transition: transform 0.3s;
+            font-size: 0.8rem;
+        }
+        .legend-dropdown-toggle.active .legend-dropdown-arrow {
+            transform: rotate(180deg);
+        }
+        .legend-dropdown-content {
+            padding: 1rem;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .legend-dropdown-header {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: #818cf8;
+            margin-bottom: 0.75rem;
+        }
+        .legend-reset-btn-dropdown {
+            width: 100%;
+            padding: 0.75rem;
+            margin-bottom: 0.75rem;
+            background: rgba(129, 140, 248, 0.2);
+            border: 1px solid #818cf8;
+            border-radius: 8px;
+            color: #818cf8;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 600;
+            transition: all 0.2s;
+            font-family: 'Outfit', sans-serif;
+        }
+        .legend-reset-btn-dropdown:hover {
+            background: rgba(129, 140, 248, 0.3);
+        }
+        .legend-dropdown-items {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 0.5rem;
+        }
+        .legend-dropdown-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 1px solid transparent;
+        }
+        .legend-dropdown-item:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+        .legend-dropdown-item.active {
+            background: rgba(129, 140, 248, 0.2);
+            border-color: #818cf8;
+        }
+        .legend-dropdown-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            flex-shrink: 0;
+        }
+        .legend-dropdown-label {
+            font-size: 0.85rem;
+            color: #f8fafc;
+            word-break: break-word;
+        }
+        @media (min-width: 769px) {
+            .legend-dropdown-container {
+                display: none;
+            }
         }
         .stats-section {
             background: rgba(15, 23, 42, 0.6);
@@ -979,6 +1312,113 @@ document.addEventListener('DOMContentLoaded', () => {
             padding-top: 2rem;
             border-top: 1px solid rgba(255, 255, 255, 0.1);
         }
+        @media (max-width: 768px) {
+            body {
+                padding: 1rem;
+            }
+            .container {
+                padding: 1rem;
+            }
+            h1 {
+                font-size: 1.8rem;
+            }
+            .maps-section {
+                grid-template-columns: 1fr;
+                gap: 1rem;
+            }
+            #interactive-map {
+                height: 400px;
+            }
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+            .map-card {
+                position: relative;
+                margin-bottom: 1rem;
+            }
+            #interactive-map {
+                margin-bottom: 0;
+            }
+            .leaflet-top.leaflet-right {
+                display: none !important;
+            }
+            .legend-dropdown-container {
+                display: block;
+            }
+            .stats-section {
+                margin-top: 2rem;
+            }
+        }
+        @media (max-width: 480px) {
+            body {
+                padding: 0.5rem;
+            }
+            .container {
+                padding: 0.75rem;
+            }
+            h1 {
+                font-size: 1.5rem;
+            }
+            .subtitle {
+                font-size: 0.85rem;
+            }
+            #interactive-map {
+                height: 300px;
+            }
+            .stat-value {
+                font-size: 1.5rem;
+            }
+            .legend-dropdown-items {
+                grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)) !important;
+            }
+            .legend-dropdown-label {
+                font-size: 0.7rem !important;
+            }
+            .legend-dropdown-color {
+                width: 16px !important;
+                height: 16px !important;
+            }
+            .legend-header {
+                font-size: 0.8rem !important;
+                margin-bottom: 0.4rem !important;
+            }
+            .legend-reset-btn {
+                font-size: 0.7rem !important;
+                padding: 0.4rem !important;
+                margin-bottom: 0.25rem !important;
+            }
+            .legend-item {
+                padding: 0.25rem !important;
+                margin-bottom: 0 !important;
+                gap: 0.4rem !important;
+            }
+            .legend-color {
+                width: 14px !important;
+                height: 14px !important;
+                min-width: 14px !important;
+                min-height: 14px !important;
+            }
+            .legend-label {
+                font-size: 0.6rem !important;
+            }
+            .table-wrapper {
+                max-height: 300px;
+            }
+            table {
+                font-size: 0.8rem;
+            }
+            table th, table td {
+                padding: 0.5rem;
+            }
+        }
+        @media (min-width: 769px) and (max-width: 1024px) {
+            #interactive-map {
+                height: 500px;
+            }
+            .leaflet-control-legend {
+                max-width: 260px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -988,9 +1428,21 @@ document.addEventListener('DOMContentLoaded', () => {
         
         <div class="maps-section" style="grid-template-columns: 1fr;">
             <div class="map-card">
-                <h3>Change Analysis</h3>
-                ${changeImage ? `<img src="${changeImage}" alt="Change Map">` : '<p style="color: #94a3b8;">Map image not available</p>'}
+                <h3>Change Analysis - Interactive Map</h3>
+                <div id="interactive-map"></div>
                 <p style="margin-top: 0.5rem; color: #94a3b8; font-size: 0.9rem;">Attribute: ${state.selectedAttribute || 'Not selected'}</p>
+            </div>
+        </div>
+        
+        <div class="legend-dropdown-container" id="legend-dropdown-container">
+            <button class="legend-dropdown-toggle" id="legend-dropdown-toggle">
+                <span>Legend</span>
+                <span class="legend-dropdown-arrow">▼</span>
+            </button>
+            <div class="legend-dropdown-content" id="legend-dropdown-content" style="display: none;">
+                <div class="legend-dropdown-header">Legend (Click to Highlight)</div>
+                <button class="legend-reset-btn-dropdown" id="legend-reset-btn-dropdown">View All</button>
+                <div class="legend-dropdown-items" id="legend-dropdown-items"></div>
             </div>
         </div>
 
@@ -1026,6 +1478,428 @@ document.addEventListener('DOMContentLoaded', () => {
             <p>Generated by GeoDrift Impact Analysis Tool</p>
         </div>
     </div>
+    <script>
+        const changeGeoJSON = ${geoJSONString};
+        const transitionColorMap = ${JSON.stringify(transitionColorMap)};
+        const legendData = ${legendDataString};
+        const UNCHANGED_KEY = '__UNCHANGED__';
+        const VIEW_ALL_KEY = '__VIEW_ALL__';
+        
+        let map;
+        let geoJsonLayer;
+        let selectedKey = null;
+        
+        function getTransitionKey(feature) {
+            if (!feature || !feature.properties) return null;
+            if (feature.properties.status !== 'changed') {
+                return UNCHANGED_KEY;
+            }
+            return feature.properties.before_value + ' → ' + feature.properties.after_value;
+        }
+        
+        function getChangeFeatureStyle(feature) {
+            if (!feature || !feature.properties) return {};
+            
+            if (feature.properties.status !== 'changed') {
+                return {
+                    color: '#10b981',
+                    weight: 1,
+                    fillColor: '#10b981',
+                    fillOpacity: 0.3,
+                    opacity: 1
+                };
+            }
+            
+            const transition = getTransitionKey(feature);
+            const color = transitionColorMap[transition] || '#f59e0b';
+            return {
+                color: color,
+                weight: 2,
+                fillColor: color,
+                fillOpacity: 0.7,
+                opacity: 1
+            };
+        }
+        
+        function getFeatureStyle(feature, highlightKey) {
+            if (!feature || !feature.properties) return {};
+            
+            const isUnchanged = feature.properties.status !== 'changed';
+            const transitionKey = getTransitionKey(feature);
+            
+            // If View All is selected, show all features normally (default styles)
+            if (!highlightKey || highlightKey === VIEW_ALL_KEY) {
+                return getChangeFeatureStyle(feature);
+            }
+            
+            // Check if this feature matches the selected key
+            const matches = transitionKey === highlightKey;
+            
+            if (isUnchanged) {
+                return {
+                    color: '#10b981',
+                    weight: matches ? 3 : 1,
+                    fillColor: '#10b981',
+                    fillOpacity: matches ? 0.6 : 0.05,
+                    opacity: matches ? 1 : 0.2
+                };
+            }
+            
+            const color = transitionColorMap[transitionKey] || '#f59e0b';
+            return {
+                color: color,
+                weight: matches ? 3 : 1,
+                fillColor: color,
+                fillOpacity: matches ? 0.9 : 0.05,
+                opacity: matches ? 1 : 0.2
+            };
+        }
+        
+        function highlightFeatures(key) {
+            if (!geoJsonLayer) return;
+            
+            geoJsonLayer.eachLayer(function(layer) {
+                const feature = layer.feature;
+                const baseStyle = getChangeFeatureStyle(feature);
+                const transitionKey = getTransitionKey(feature);
+                const matches = transitionKey === key;
+                
+                layer.setStyle({
+                    ...baseStyle,
+                    opacity: matches ? 1 : 0.2,
+                    fillOpacity: matches ? Math.min(baseStyle.fillOpacity + 0.2, 1) : 0.05,
+                    weight: matches ? baseStyle.weight + 1 : 1
+                });
+                
+                // Bring matching features to front
+                if (matches && layer.bringToFront) {
+                    layer.bringToFront();
+                }
+            });
+        }
+        
+        function resetChangeStyles() {
+            if (!geoJsonLayer) return;
+            selectedKey = null;
+            geoJsonLayer.eachLayer(function(layer) {
+                const feature = layer.feature;
+                if (!feature || !feature.properties) return;
+                
+                const isUnchanged = feature.properties.status !== 'changed';
+                
+                if (isUnchanged) {
+                    layer.setStyle({
+                        color: '#10b981',
+                        weight: 1,
+                        fillColor: '#10b981',
+                        fillOpacity: 0.3,
+                        opacity: 1
+                    });
+                } else {
+                    const transition = getTransitionKey(feature);
+                    const color = transitionColorMap[transition] || '#f59e0b';
+                    layer.setStyle({
+                        color: color,
+                        weight: 2,
+                        fillColor: color,
+                        fillOpacity: 0.7,
+                        opacity: 1
+                    });
+                }
+            });
+        }
+        
+        // Custom Legend Control
+        const LegendControl = L.Control.extend({
+            onAdd: function(map) {
+                const container = L.DomUtil.create('div', 'leaflet-control-legend');
+                const header = L.DomUtil.create('div', 'legend-header');
+                header.textContent = 'Legend (Click to Highlight)';
+                container.appendChild(header);
+                
+                // Add Force Reset button
+                const resetBtn = L.DomUtil.create('button', 'legend-reset-btn');
+                resetBtn.innerHTML = ' View All';
+                resetBtn.style.cssText = 'width: 100%; padding: 0.75rem; margin-bottom: 0.75rem; background: rgba(129, 140, 248, 0.2); border: 1px solid #818cf8; border-radius: 8px; color: #818cf8; cursor: pointer; font-size: 0.9rem; font-weight: 600; transition: all 0.2s;';
+                resetBtn.addEventListener('mouseenter', function() {
+                    this.style.background = 'rgba(129, 140, 248, 0.3)';
+                });
+                resetBtn.addEventListener('mouseleave', function() {
+                    this.style.background = 'rgba(129, 140, 248, 0.2)';
+                });
+                resetBtn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    // Reset all features to default visibility
+                    if (geoJsonLayer) {
+                        geoJsonLayer.eachLayer(function(layer) {
+                            const feature = layer.feature;
+                            if (!feature || !feature.properties) return;
+                            
+                            const isUnchanged = feature.properties.status !== 'changed';
+                            
+                            if (isUnchanged) {
+                                layer.setStyle({
+                                    color: '#10b981',
+                                    weight: 1,
+                                    fillColor: '#10b981',
+                                    fillOpacity: 0.3,
+                                    opacity: 1
+                                });
+                            } else {
+                                const transition = getTransitionKey(feature);
+                                const color = transitionColorMap[transition] || '#f59e0b';
+                                layer.setStyle({
+                                    color: color,
+                                    weight: 2,
+                                    fillColor: color,
+                                    fillOpacity: 0.7,
+                                    opacity: 1
+                                });
+                            }
+                        });
+                    }
+                    // Remove active state from all legend items
+                    container.querySelectorAll('.legend-item').forEach(i => i.classList.remove('active'));
+                    selectedKey = null;
+                });
+                container.appendChild(resetBtn);
+                
+                const separator = L.DomUtil.create('div', 'legend-separator');
+                separator.style.cssText = 'height: 1px; background: rgba(255, 255, 255, 0.2); margin: 0.5rem 0;';
+                container.appendChild(separator);
+                
+                legendData.forEach((item, index) => {
+                    if (index > 0) {
+                        const sep = L.DomUtil.create('div', 'legend-separator');
+                        sep.style.cssText = 'height: 1px; background: rgba(255, 255, 255, 0.2); margin: 0.5rem 0;';
+                        container.appendChild(sep);
+                    }
+                    
+                    const itemDiv = L.DomUtil.create('div', 'legend-item');
+                    itemDiv.dataset.key = item.key;
+                    itemDiv.style.display = 'flex';
+                    itemDiv.style.alignItems = 'center';
+                    itemDiv.style.gap = '0.75rem';
+                    itemDiv.style.padding = '0.5rem';
+                    itemDiv.style.marginBottom = '0.5rem';
+                    itemDiv.style.borderRadius = '8px';
+                    itemDiv.style.cursor = 'pointer';
+                    itemDiv.style.transition = 'all 0.2s';
+                    itemDiv.style.border = '1px solid transparent';
+                    itemDiv.style.userSelect = 'none';
+                    itemDiv.style.listStyle = 'none';
+                    itemDiv.style.webkitAppearance = 'none';
+                    itemDiv.style.mozAppearance = 'none';
+                    itemDiv.style.appearance = 'none';
+                    
+                    const colorDiv = L.DomUtil.create('div', 'legend-color');
+                    colorDiv.style.width = '24px';
+                    colorDiv.style.height = '24px';
+                    colorDiv.style.borderRadius = '4px';
+                    colorDiv.style.border = '1px solid rgba(255, 255, 255, 0.3)';
+                    colorDiv.style.flexShrink = '0';
+                    colorDiv.style.display = 'block';
+                    colorDiv.style.webkitAppearance = 'none';
+                    colorDiv.style.mozAppearance = 'none';
+                    colorDiv.style.appearance = 'none';
+                    
+                    if (item.isDashed) {
+                        colorDiv.style.background = 'transparent';
+                        colorDiv.style.border = '2px dashed rgba(255,255,255,0.3)';
+                    } else {
+                        colorDiv.style.backgroundColor = item.color;
+                    }
+                    
+                    const labelDiv = L.DomUtil.create('div', 'legend-label');
+                    labelDiv.textContent = item.label;
+                    labelDiv.style.fontSize = '0.85rem';
+                    labelDiv.style.wordBreak = 'break-word';
+                    labelDiv.style.color = '#f8fafc';
+                    labelDiv.style.flex = '1';
+                    
+                    itemDiv.appendChild(colorDiv);
+                    itemDiv.appendChild(labelDiv);
+                    
+                    // Add click handler
+                    itemDiv.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        const key = this.dataset.key;
+                        
+                        // Update active state
+                        container.querySelectorAll('.legend-item').forEach(i => i.classList.remove('active'));
+                        this.classList.add('active');
+                        
+                        selectedKey = key;
+                        highlightFeatures(key);
+                    });
+                    
+                    container.appendChild(itemDiv);
+                });
+                
+                L.DomEvent.disableClickPropagation(container);
+                return container;
+            }
+        });
+        
+        // Initialize map with light basemap
+        map = L.map('interactive-map').setView([20, 0], 2);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; OpenStreetMap &copy; CARTO'
+        }).addTo(map);
+        
+        // Add zoom control
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
+        
+        // Add area scale control
+        // Add scale control to report map
+        L.control.scale({ 
+            position: 'bottomleft',
+            imperial: false,
+            metric: true
+        }).addTo(map);
+        
+        // Add north/reset button
+        const NorthControl = L.Control.extend({
+            onAdd: function(map) {
+                const container = L.DomUtil.create('div', 'leaflet-control-north');
+                const button = L.DomUtil.create('button', 'north-control-btn');
+                button.innerHTML = '🧭';
+                button.style.cssText = 'width: 40px; height: 40px; border-radius: 50%; border: none; background: rgba(30, 41, 59, 0.9); border: 1px solid rgba(255, 255, 255, 0.2); color: #f8fafc; cursor: pointer; font-size: 1.2rem; display: flex; align-items: center; justify-content: center; transition: all 0.2s;';
+                button.addEventListener('mouseenter', function() {
+                    this.style.background = 'rgba(129, 140, 248, 0.3)';
+                });
+                button.addEventListener('mouseleave', function() {
+                    this.style.background = 'rgba(30, 41, 59, 0.9)';
+                });
+                button.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    if (changeGeoJSON.features && changeGeoJSON.features.length > 0 && geoJsonLayer) {
+                        map.fitBounds(geoJsonLayer.getBounds());
+                    } else {
+                        map.setView([20, 0], 2);
+                    }
+                });
+                container.appendChild(button);
+                L.DomEvent.disableClickPropagation(container);
+                return container;
+            }
+        });
+        new NorthControl({ position: 'topleft' }).addTo(map);
+        
+        // Add GeoJSON layer with default styles
+        geoJsonLayer = L.geoJSON(changeGeoJSON, {
+            style: (feature) => getChangeFeatureStyle(feature),
+            onEachFeature: (feature, layer) => {
+                const props = feature.properties;
+                let popupContent = '<div style="font-family: Outfit, sans-serif; color: #000;">';
+                popupContent += '<strong>Status:</strong> ' + props.status + '<br>';
+                popupContent += '<strong>Before:</strong> ' + props.before_value + '<br>';
+                popupContent += '<strong>After:</strong> ' + props.after_value + '<br>';
+                popupContent += '<strong>Area:</strong> ' + (props.area_m2 / 10000).toFixed(2) + ' ha<br>';
+                popupContent += '</div>';
+                layer.bindPopup(popupContent);
+            }
+        }).addTo(map);
+        
+        // Fit bounds
+        if (changeGeoJSON.features && changeGeoJSON.features.length > 0) {
+            map.fitBounds(geoJsonLayer.getBounds());
+        }
+        
+        // Add legend control
+        const legendControl = new LegendControl({ position: 'topright' });
+        legendControl.addTo(map);
+        
+        // Setup dropdown legend for mobile
+        const dropdownToggle = document.getElementById('legend-dropdown-toggle');
+        const dropdownContent = document.getElementById('legend-dropdown-content');
+        const dropdownItems = document.getElementById('legend-dropdown-items');
+        const resetBtnDropdown = document.getElementById('legend-reset-btn-dropdown');
+        
+        if (dropdownToggle && dropdownContent && dropdownItems) {
+            // Toggle dropdown
+            dropdownToggle.addEventListener('click', function() {
+                const isOpen = dropdownContent.style.display !== 'none';
+                dropdownContent.style.display = isOpen ? 'none' : 'block';
+                dropdownToggle.classList.toggle('active', !isOpen);
+            });
+            
+            // Populate dropdown items
+            legendData.forEach((item) => {
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'legend-dropdown-item';
+                itemDiv.dataset.key = item.key;
+                
+                const colorDiv = document.createElement('div');
+                colorDiv.className = 'legend-dropdown-color';
+                if (item.isDashed) {
+                    colorDiv.style.background = 'transparent';
+                    colorDiv.style.border = '2px dashed rgba(255,255,255,0.3)';
+                } else {
+                    colorDiv.style.backgroundColor = item.color;
+                }
+                
+                const labelDiv = document.createElement('div');
+                labelDiv.className = 'legend-dropdown-label';
+                labelDiv.textContent = item.label;
+                
+                itemDiv.appendChild(colorDiv);
+                itemDiv.appendChild(labelDiv);
+                
+                // Add click handler
+                itemDiv.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    const key = this.dataset.key;
+                    
+                    // Update active state
+                    dropdownItems.querySelectorAll('.legend-dropdown-item').forEach(i => i.classList.remove('active'));
+                    this.classList.add('active');
+                    
+                    selectedKey = key;
+                    highlightFeatures(key);
+                });
+                
+                dropdownItems.appendChild(itemDiv);
+            });
+            
+            // Reset button handler
+            if (resetBtnDropdown) {
+                resetBtnDropdown.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    resetChangeStyles();
+                    dropdownItems.querySelectorAll('.legend-dropdown-item').forEach(i => i.classList.remove('active'));
+                    selectedKey = null;
+                });
+            }
+        }
+        
+        // Set View All as active initially and ensure all features are visible
+        setTimeout(function() {
+            const viewAllItem = document.querySelector('.legend-item[data-key="__VIEW_ALL__"]');
+            if (viewAllItem) {
+                viewAllItem.classList.add('active');
+            }
+            // Ensure all features are at default visibility
+            resetChangeStyles();
+        }, 300);
+        
+        // Handle window resize for mobile
+        let resizeTimer;
+        window.addEventListener('resize', function() {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(function() {
+                map.invalidateSize();
+                if (changeGeoJSON.features && changeGeoJSON.features.length > 0) {
+                    map.fitBounds(geoJsonLayer.getBounds());
+                }
+            }, 250);
+        });
+        
+        // Initial resize check for mobile
+        setTimeout(function() {
+            map.invalidateSize();
+        }, 100);
+    </script>
 </body>
 </html>`;
     }
@@ -1055,6 +1929,37 @@ document.addEventListener('DOMContentLoaded', () => {
 
     mapBefore.on('move', () => syncMaps(mapBefore, mapAfter));
     mapAfter.on('move', () => syncMaps(mapAfter, mapBefore));
+
+    // North/Reset button
+    const northBtn = document.getElementById('north-btn');
+    if (northBtn) {
+        northBtn.addEventListener('click', () => {
+            // Reset all maps to north (no rotation) and recenter if there are layers
+            const maps = [mapBefore, mapAfter];
+            if (mapChange) maps.push(mapChange);
+            
+            maps.forEach(map => {
+                if (map) {
+                    // If there's a layer, fit to bounds, otherwise just reset view
+                    let hasLayer = false;
+                    if (state.before.layer && map === mapBefore) {
+                        map.fitBounds(state.before.layer.getBounds());
+                        hasLayer = true;
+                    } else if (state.after.layer && map === mapAfter) {
+                        map.fitBounds(state.after.layer.getBounds());
+                        hasLayer = true;
+                    } else if (state.change.layer && map === mapChange) {
+                        map.fitBounds(state.change.layer.getBounds());
+                        hasLayer = true;
+                    }
+                    
+                    if (!hasLayer) {
+                        map.setView([20, 0], 2);
+                    }
+                }
+            });
+        });
+    }
 
     document.getElementById('sync-maps-btn').addEventListener('click', (e) => {
         state.syncEnabled = !state.syncEnabled;
