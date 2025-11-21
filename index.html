@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GeoDrift Impact Analysis</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/style.css">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="https://unpkg.com/shpjs@latest/dist/shp.js"></script>
+    <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <style>
+        #map-before,
+        #map-after,
+        #map-change {
+            height: 100%;
+            width: 100%;
+            z-index: 1;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="app-container full-screen">
+        <header class="floating-header">
+            <h1>GeoDrift <span class="highlight">Impact</span></h1>
+        </header>
+
+        <!-- Split View for Before/After -->
+        <div class="split-view" id="split-view">
+            <div class="pane" id="pane-before">
+                <div id="map-before"></div>
+                <div class="upload-overlay glass" id="drop-zone-before">
+                    <div class="content">
+                        <span class="material-icons-round icon-badge">history</span>
+                        <h2>Before State</h2>
+                        <span class="material-icons-round upload-icon">cloud_upload</span>
+                        <p>Drag & Drop Shapefile (.zip)</p>
+                        <input type="file" id="file-before" class="file-input" accept=".zip,.shp" hidden>
+                    </div>
+                </div>
+            </div>
+
+            <div class="pane" id="pane-after">
+                <div id="map-after"></div>
+                <div class="upload-overlay glass" id="drop-zone-after">
+                    <div class="content">
+                        <span class="material-icons-round icon-badge">update</span>
+                        <h2>After State</h2>
+                        <span class="material-icons-round upload-icon">cloud_upload</span>
+                        <p>Drag & Drop Shapefile (.zip)</p>
+                        <input type="file" id="file-after" class="file-input" accept=".zip,.shp" hidden>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Change Map View -->
+        <div class="change-view hidden" id="change-view">
+            <div id="map-change"></div>
+            <button id="back-to-split" class="back-btn glass">
+                <span class="material-icons-round">arrow_back</span>
+                Back to Comparison
+            </button>
+        </div>
+
+        <div class="controls">
+            <select id="attribute-select" class="glass-select" disabled>
+                <option value="">Select Attribute Column</option>
+            </select>
+            <div class="v-divider"></div>
+            <button id="legend-toggle-btn" class="icon-btn" title="Toggle Legend">
+                <span class="material-icons-round">palette</span>
+            </button>
+            <div class="v-divider"></div>
+            <button id="stats-toggle-btn" class="icon-btn" title="Toggle Change Analysis" disabled>
+                <span class="material-icons-round">insights</span>
+            </button>
+            <div class="v-divider"></div>
+            <button id="download-report-btn" class="icon-btn" title="Download Report" disabled>
+                <span class="material-icons-round">download</span>
+            </button>
+            <div class="v-divider"></div>
+            <button id="sync-maps-btn" class="icon-btn active" title="Sync Maps">
+                <span class="material-icons-round">link</span>
+            </button>
+            <button id="process-btn" class="primary-btn" disabled>
+                <span class="material-icons-round">analytics</span>
+                Analyze Changes
+            </button>
+        </div>
+
+        <!-- Legend -->
+        <div id="legend-panel" class="legend-panel glass hidden">
+            <div class="legend-header">
+                <span class="material-icons-round">palette</span>
+                <h3>Legend</h3>
+                <button id="legend-close" class="close-btn">
+                    <span class="material-icons-round">close</span>
+                </button>
+            </div>
+            <div id="legend-content" class="legend-content"></div>
+        </div>
+
+        <!-- Statistics Panel -->
+        <div id="stats-panel" class="stats-panel glass hidden">
+            <div class="stats-header">
+                <span class="material-icons-round">insights</span>
+                <h3>Change Analysis</h3>
+                <button id="stats-close" class="close-btn">
+                    <span class="material-icons-round">close</span>
+                </button>
+            </div>
+            <div id="stats-content" class="stats-content">
+                <div class="stat-loading">
+                    <span class="material-icons-round spin">sync</span>
+                    <p>Analyzing changes...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="assets/js/script.js"></script>
+</body>
+
+</html>
