@@ -86,7 +86,10 @@
             </button>
             <div class="v-divider"></div>
             <button id="download-report-btn" class="icon-btn" title="Download Report" disabled>
-                <span class="material-icons-round">download</span>
+                <span class="material-icons-round">description</span>
+            </button>
+            <button id="download-map-btn" class="icon-btn" title="Download Map Image" disabled>
+                <span class="material-icons-round">image</span>
             </button>
             <div class="v-divider"></div>
             <div class="map-layer-selector">
@@ -122,6 +125,35 @@
             </button>
         </div>
 
+        <!-- Feature Details Panel -->
+        <div id="feature-details-panel" class="feature-details-panel glass hidden">
+            <div class="panel-header">
+                <span class="material-icons-round">info</span>
+                <h3>Polygon Details</h3>
+                <button id="details-close" class="close-btn">
+                    <span class="material-icons-round">close</span>
+                </button>
+            </div>
+            <div class="detail-content">
+                <div class="detail-row">
+                    <span class="label">Before Land Use</span>
+                    <span class="value" id="detail-before">-</span>
+                </div>
+                <div class="detail-row">
+                    <span class="label">After Land Use</span>
+                    <span class="value" id="detail-after">-</span>
+                </div>
+                <div class="detail-row">
+                    <span class="label">Change Status</span>
+                    <span class="value" id="detail-status">-</span>
+                </div>
+                <div class="detail-row">
+                    <span class="label">Area Size</span>
+                    <span class="value" id="detail-area">-</span>
+                </div>
+            </div>
+        </div>
+
         <!-- Legend -->
         <div id="legend-panel" class="legend-panel glass hidden">
             <div class="legend-header">
@@ -153,6 +185,9 @@
     </div>
 
     <script src="assets/js/script.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dom-to-image/2.6.0/dom-to-image.min.js"></script>
 </body>
 
 </html>
+

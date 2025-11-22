@@ -31,13 +31,13 @@ document.addEventListener('DOMContentLoaded', () => {
     L.control.zoom({ position: 'bottomright' }).addTo(mapAfter);
 
     // Add scale controls to main maps (standard Leaflet scale)
-    L.control.scale({ 
+    L.control.scale({
         position: 'bottomleft',
         imperial: false,
         metric: true
     }).addTo(mapBefore);
-    
-    L.control.scale({ 
+
+    L.control.scale({
         position: 'bottomleft',
         imperial: false,
         metric: true
@@ -74,6 +74,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const legendToggleBtn = document.getElementById('legend-toggle-btn');
     const statsToggleBtn = document.getElementById('stats-toggle-btn');
     const downloadReportBtn = document.getElementById('download-report-btn');
+    const downloadMapBtn = document.getElementById('download-map-btn');
     const mapLayerBtn = document.getElementById('map-layer-btn');
     const mapLayerMenu = document.getElementById('map-layer-menu');
     const layerOptions = document.querySelectorAll('.layer-option');
@@ -596,6 +597,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (downloadReportBtn) {
                 downloadReportBtn.disabled = false;
             }
+            if (downloadMapBtn) {
+                downloadMapBtn.disabled = false;
+            }
 
             // Show change map
             showChangeMap(results.changeFeatures);
@@ -710,14 +714,14 @@ document.addEventListener('DOMContentLoaded', () => {
             changeTileLayer = L.tileLayer(currentBasemapConfig.url, { attribution: currentBasemapConfig.attribution });
             changeTileLayer.addTo(mapChange);
             L.control.zoom({ position: 'bottomright' }).addTo(mapChange);
-            
+
             // Add scale control to change map
-            L.control.scale({ 
+            L.control.scale({
                 position: 'bottomleft',
                 imperial: false,
                 metric: true
             }).addTo(mapChange);
-            
+
             state.change.map = mapChange;
         } else if (changeTileLayer && state.change.map) {
             // Ensure change map uses current basemap if it already exists
@@ -756,28 +760,93 @@ document.addEventListener('DOMContentLoaded', () => {
         // Store for legend
         state.transitionColorMap = transitionColorMap;
 
-        // Create GeoJSON from change features
-        const changeGeoJSON = {
+        // Prepare for dissolving adjacent polygons to reduce label clutter
+        changeFeatures.forEach(f => {
+            if (f.properties) {
+                f.properties.transition_id = `${f.properties.before_value}|${f.properties.after_value}`;
+            }
+        });
+
+        const rawGeoJSON = {
             type: 'FeatureCollection',
             features: changeFeatures
         };
 
-        state.change.geojson = changeGeoJSON;
+        let finalGeoJSON = rawGeoJSON;
+
+        try {
+            // Dissolve features with the same transition type to merge adjacent polygons
+            const dissolved = turf.dissolve(rawGeoJSON, { propertyName: 'transition_id' });
+
+            // Flatten MultiPolygons back to Polygons to ensure disjoint areas are treated separately
+            // This merges adjacent polygons but keeps spatially separated ones distinct
+            finalGeoJSON = turf.flatten(dissolved);
+
+            // Restore properties and recalculate area for the merged polygons
+            finalGeoJSON.features.forEach(f => {
+                f.properties.area_m2 = turf.area(f);
+
+                // Restore other properties from the transition_id if needed
+                if (f.properties.transition_id) {
+                    const parts = f.properties.transition_id.split('|');
+                    f.properties.before_value = parts[0];
+                    f.properties.after_value = parts[1];
+                    f.properties.status = (parts[0] === parts[1]) ? 'same' : 'changed';
+                }
+            });
+        } catch (error) {
+            console.warn('Error dissolving features:', error);
+            // Fallback to raw features if dissolve fails
+            finalGeoJSON = rawGeoJSON;
+        }
+
+        state.change.geojson = finalGeoJSON;
 
         // Add to map with styling
-        const layer = L.geoJSON(changeGeoJSON, {
+        const layer = L.geoJSON(finalGeoJSON, {
             style: (feature) => getChangeFeatureStyle(feature),
             onEachFeature: (feature, layer) => {
                 const props = feature.properties;
-                let popupContent = `<div style="color: #000; font-family: 'Outfit', sans-serif;">`;
-                popupContent += `<strong>Status:</strong> ${props.status}<br>`;
-                popupContent += `<strong>Before:</strong> ${props.before_value}<br>`;
-                popupContent += `<strong>After:</strong> ${props.after_value}<br>`;
-                popupContent += `<strong>Area:</strong> ${formatArea(props.area_m2)}<br>`;
-                popupContent += `</div>`;
-                layer.bindPopup(popupContent);
+
+                // Create tooltip content
+                let tooltipContent = `
+                    <div class="tooltip-row"><strong>Before:</strong> ${props.before_value}</div>
+                    <div class="tooltip-row"><strong>After:</strong> ${props.after_value}</div>
+                    <div class="tooltip-row"><strong>Status:</strong> <span style="color: ${props.status === 'changed' ? '#f59e0b' : '#10b981'}">${props.status === 'changed' ? 'Changed' : 'Unchanged'}</span></div>
+                    <div class="tooltip-row"><strong>Area:</strong> ${formatArea(props.area_m2)}</div>
+                `;
+
+                layer.bindTooltip(tooltipContent, {
+                    permanent: true,
+                    sticky: false,
+                    className: 'custom-tooltip',
+                    direction: 'center',
+                    opacity: 0.9
+                });
+
+                // Hover interaction
+                layer.on('mouseover', (e) => {
+                    const layer = e.target;
+
+                    // Highlight style
+                    layer.setStyle({
+                        weight: 3,
+                        color: '#fff',
+                        fillOpacity: 0.9
+                    });
+                    layer.bringToFront();
+                });
+
+                layer.on('mouseout', (e) => {
+                    // Reset style to default
+                    const layer = e.target;
+                    layer.setStyle(getChangeFeatureStyle(feature));
+                });
             }
         }).addTo(mapChange);
+
+        // Remove the map click handler that hides the panel to allow persistent viewing of last hovered item
+        // mapChange.on('click', () => { ... });
 
         state.change.layer = layer;
 
@@ -794,6 +863,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('back-to-split').addEventListener('click', () => {
         document.getElementById('change-view').classList.add('hidden');
         document.getElementById('split-view').classList.remove('hidden');
+        document.getElementById('feature-details-panel').classList.add('hidden');
 
         // Invalidate map sizes
         setTimeout(() => {
@@ -857,13 +927,16 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
         `;
 
+        // Top changes are now shown in the side panel, but we keep them here for the full report context if needed.
+        // However, to avoid redundancy if the user wants it "on this location" (side panel), we can simplify the left panel 
+        // or keep it as a detailed view. I'll keep it here as well for completeness in the "Analysis" tab.
         if (results.changeMatrix.length > 0) {
             html += `
                 <div class="stat-card">
                     <h4>Top Changes (by Area)</h4>
             `;
 
-            results.changeMatrix.slice(0, 10).forEach(change => {
+            results.changeMatrix.slice(0, 5).forEach(change => {
                 const transition = `${change.from} → ${change.to}`;
                 const changeAreaHa = change.area / 10000;
                 const changePercent = (change.area / results.changedArea * 100);
@@ -875,7 +948,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         </div>
                         <div style="text-align: right; color: var(--text-muted); font-size: 0.85rem;">
                             <div><strong>${changeAreaHa.toFixed(2)} ha</strong></div>
-                            <div>${changePercent.toFixed(1)}% of changes</div>
+                            <div>${changePercent.toFixed(1)}%</div>
                         </div>
                     </div>
                 `;
@@ -885,6 +958,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         statsContent.innerHTML = html;
+
+        // Show Top Changes in the side panel by default
+        showTopChangesPanel();
     }
 
     function formatArea(area) {
@@ -893,12 +969,78 @@ document.addEventListener('DOMContentLoaded', () => {
         return `${hectares.toFixed(2)} ha`;
     }
 
+    function showTopChangesPanel() {
+        const results = state.changeResults;
+        if (!results || !results.changeMatrix) return;
+
+        const panel = document.getElementById('feature-details-panel');
+        const header = panel.querySelector('.panel-header h3');
+        const content = panel.querySelector('.detail-content');
+
+        header.textContent = 'Top Changes (by Area)';
+
+        let html = '<div class="top-changes-list" style="max-height: 400px; overflow-y: auto; padding-right: 0.5rem;">';
+
+        results.changeMatrix.slice(0, 10).forEach(change => {
+            const transition = `${change.from} → ${change.to}`;
+            const areaHa = (change.area / 10000).toFixed(2);
+            const percent = (change.area / results.changedArea * 100).toFixed(1);
+
+            html += `
+                <div class="change-item" style="margin-bottom: 0.75rem; border-bottom: 1px solid var(--glass-border); padding-bottom: 0.5rem;">
+                    <div style="font-size: 0.9rem; font-weight: 500; color: var(--text-main); margin-bottom: 0.25rem;">${transition}</div>
+                    <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: var(--text-muted);">
+                        <span>${areaHa} ha</span>
+                        <span>${percent}% of changes</span>
+                    </div>
+                </div>
+            `;
+        });
+
+        html += '</div>';
+        content.innerHTML = html;
+        panel.classList.remove('hidden');
+    }
+
+    function updateFeatureDetails(props) {
+        const panel = document.getElementById('feature-details-panel');
+        const header = panel.querySelector('.panel-header h3');
+        const content = panel.querySelector('.detail-content');
+
+        header.textContent = 'Polygon Details';
+
+        content.innerHTML = `
+            <div class="detail-row">
+                <span class="label">Before Land Use</span>
+                <span class="value">${props.before_value}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">After Land Use</span>
+                <span class="value">${props.after_value}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">Change Status</span>
+                <span class="value" style="color: ${props.status === 'changed' ? 'var(--change-color)' : 'var(--same-color)'}">${props.status === 'changed' ? 'Changed' : 'Unchanged'}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">Area Size</span>
+                <span class="value">${formatArea(props.area_m2)}</span>
+            </div>
+        `;
+
+        panel.classList.remove('hidden');
+    }
+
+    document.getElementById('details-close').addEventListener('click', () => {
+        document.getElementById('feature-details-panel').classList.add('hidden');
+    });
+
     // --- Download Report Webpage ---
     async function captureMapImage(mapContainer) {
         if (!mapContainer || typeof html2canvas === 'undefined') {
             return null;
         }
-        
+
         try {
             const canvas = await html2canvas(mapContainer, {
                 useCORS: true,
@@ -919,33 +1061,136 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        if (typeof html2canvas === 'undefined') {
-            alert('Report generation library not loaded. Please refresh the page.');
-            return;
-        }
-
         const originalContent = downloadReportBtn.innerHTML;
         downloadReportBtn.disabled = true;
         downloadReportBtn.innerHTML = '<span class="material-icons-round spin">sync</span>';
 
         try {
-            // Capture change map image only
+            // Capture change map image
             const changeContainer = document.getElementById('map-change');
             const changeImage = await captureMapImage(changeContainer);
 
-            // Generate HTML webpage
-            const htmlContent = generateReportHTML(changeImage);
+            const results = state.changeResults;
+            const totalAreaHa = results.totalArea / 10000;
+            const changedAreaHa = results.changedArea / 10000;
+            const sameAreaHa = results.sameArea / 10000;
 
-            // Download as HTML file
+            // Generate HTML content
+            let htmlContent = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Change Analysis Report</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #1e293b; color: #f8fafc; margin: 0; padding: 40px; }
+        .container { max-width: 900px; margin: 0 auto; background: #0f172a; padding: 40px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
+        h1 { color: #818cf8; text-align: center; margin-bottom: 10px; }
+        .date { text-align: center; color: #94a3b8; margin-bottom: 40px; }
+        .section { margin-bottom: 40px; }
+        h2 { color: #e2e8f0; border-bottom: 1px solid #334155; padding-bottom: 10px; margin-bottom: 20px; }
+        .map-container { width: 100%; height: 400px; background: #1e293b; border-radius: 8px; overflow: hidden; margin-bottom: 20px; border: 1px solid #334155; display: flex; align-items: center; justify-content: center; }
+        .map-img { width: 100%; height: 100%; object-fit: contain; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 20px; }
+        .stat-card { background: #1e293b; padding: 20px; border-radius: 12px; text-align: center; border: 1px solid #334155; }
+        .stat-value { font-size: 24px; font-weight: bold; color: #38bdf8; margin-bottom: 5px; }
+        .stat-label { color: #94a3b8; font-size: 14px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th { text-align: left; padding: 12px; border-bottom: 1px solid #334155; color: #818cf8; }
+        td { padding: 12px; border-bottom: 1px solid #1e293b; color: #e2e8f0; }
+        tr:last-child td { border-bottom: none; }
+        .footer { text-align: center; margin-top: 60px; color: #64748b; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Change Analysis Report</h1>
+        <div class="date">Generated on ${new Date().toLocaleDateString()}</div>
+
+        <div class="section">
+            <h2>Change Map</h2>
+            <div class="map-container">
+                ${changeImage ? `<img src="${changeImage}" class="map-img" alt="Change Map">` : '<p>Map image not available</p>'}
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Summary Statistics</h2>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value">${results.changePercentage.toFixed(2)}%</div>
+                    <div class="stat-label">Overall Change</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${totalAreaHa.toFixed(2)} ha</div>
+                    <div class="stat-label">Total Area</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${changedAreaHa.toFixed(2)} ha</div>
+                    <div class="stat-label">Changed Area</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${sameAreaHa.toFixed(2)} ha</div>
+                    <div class="stat-label">Unchanged Area</div>
+                </div>
+            </div>
+        </div>
+`;
+
+            if (results.changeMatrix && results.changeMatrix.length > 0) {
+                htmlContent += `
+        <div class="section">
+            <h2>Top Changes (by Area)</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Transition</th>
+                        <th>Area (ha)</th>
+                        <th>% of Changes</th>
+                    </tr>
+                </thead>
+                <tbody>
+`;
+                results.changeMatrix.slice(0, 10).forEach((change, index) => {
+                    const transition = `${change.from} → ${change.to}`;
+                    const areaHa = (change.area / 10000).toFixed(2);
+                    const percent = (change.area / results.changedArea * 100).toFixed(1);
+                    htmlContent += `
+                    <tr>
+                        <td>${index + 1}</td>
+                        <td>${transition}</td>
+                        <td>${areaHa}</td>
+                        <td>${percent}%</td>
+                    </tr>
+`;
+                });
+                htmlContent += `
+                </tbody>
+            </table>
+        </div>
+`;
+            }
+
+            htmlContent += `
+        <div class="footer">
+            Generated by SolarScape Analysis Tool
+        </div>
+    </div>
+</body>
+</html>
+`;
+
+            // Create blob and download
             const blob = new Blob([htmlContent], { type: 'text/html' });
             const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
-            const timestamp = new Date().toISOString().replace(/[:.-]/g, '').slice(0, 15);
-            link.download = `change_analysis_report_${timestamp}.html`;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `change_analysis_report_${new Date().toISOString().slice(0, 10)}.html`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
             URL.revokeObjectURL(url);
 
         } catch (error) {
@@ -972,7 +1217,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const legendData = [
             { key: '__UNCHANGED__', label: 'Unchanged', color: '#10b981', isDashed: false }
         ];
-        
+
         Object.entries(transitionColorMap).forEach(([transition, color]) => {
             legendData.push({
                 key: transition,
@@ -981,7 +1226,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 isDashed: false
             });
         });
-        
+
         const legendDataString = JSON.stringify(legendData).replace(/</g, '\\u003c');
 
         let topChangesHTML = '';
@@ -1908,6 +2153,55 @@ document.addEventListener('DOMContentLoaded', () => {
         downloadReportBtn.addEventListener('click', downloadReportWebpage);
     }
 
+    if (downloadMapBtn) {
+        downloadMapBtn.addEventListener('click', downloadMapImage);
+    }
+
+    async function downloadMapImage() {
+        if (!state.changeResults) return;
+
+        const originalContent = downloadMapBtn.innerHTML;
+        downloadMapBtn.disabled = true;
+        downloadMapBtn.innerHTML = '<span class="material-icons-round spin">sync</span>';
+
+        try {
+            const mapContainer = document.getElementById('map-change');
+
+            // Hide controls
+            const controls = mapContainer.querySelector('.leaflet-control-container');
+            if (controls) controls.style.display = 'none';
+
+            // Use dom-to-image which handles Leaflet transforms better
+            const dataUrl = await domtoimage.toPng(mapContainer, {
+                width: mapContainer.offsetWidth,
+                height: mapContainer.offsetHeight,
+                style: {
+                    transform: 'scale(1)',
+                    transformOrigin: 'top left'
+                }
+            });
+
+            // Restore controls
+            if (controls) controls.style.display = '';
+
+            const link = document.createElement('a');
+            link.download = `change_map_${new Date().toISOString().slice(0, 10)}.png`;
+            link.href = dataUrl;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+
+        } catch (error) {
+            console.error('Error downloading map image:', error);
+            alert('Error downloading map image. Please try again.');
+            const controls = document.getElementById('map-change').querySelector('.leaflet-control-container');
+            if (controls) controls.style.display = '';
+        } finally {
+            downloadMapBtn.disabled = false;
+            downloadMapBtn.innerHTML = originalContent;
+        }
+    }
+
     document.getElementById('stats-close').addEventListener('click', () => {
         setStatsPanelVisibility(false);
     });
@@ -1937,7 +2231,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Reset all maps to north (no rotation) and recenter if there are layers
             const maps = [mapBefore, mapAfter];
             if (mapChange) maps.push(mapChange);
-            
+
             maps.forEach(map => {
                 if (map) {
                     // If there's a layer, fit to bounds, otherwise just reset view
@@ -1952,7 +2246,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         map.fitBounds(state.change.layer.getBounds());
                         hasLayer = true;
                     }
-                    
+
                     if (!hasLayer) {
                         map.setView([20, 0], 2);
                     }
@@ -2029,6 +2323,9 @@ document.addEventListener('DOMContentLoaded', () => {
             state.changeResults = null;
             if (downloadReportBtn) {
                 downloadReportBtn.disabled = true;
+            }
+            if (downloadMapBtn) {
+                downloadMapBtn.disabled = true;
             }
             if (statsToggleBtn) {
                 statsToggleBtn.disabled = true;
