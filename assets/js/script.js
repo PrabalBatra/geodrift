@@ -802,11 +802,32 @@ document.addEventListener('DOMContentLoaded', () => {
 
         state.change.geojson = finalGeoJSON;
 
+        // Identify the largest polygon for each transition type to avoid label clutter
+        const largestFeatures = {};
+        finalGeoJSON.features.forEach(f => {
+            // Ensure transition_id exists (fallback if needed)
+            const id = f.properties.transition_id || `${f.properties.before_value}|${f.properties.after_value}`;
+
+            // Initialize if not present or update if current feature is larger
+            if (!largestFeatures[id] || f.properties.area_m2 > largestFeatures[id].area) {
+                largestFeatures[id] = {
+                    area: f.properties.area_m2,
+                    feature: f
+                };
+            }
+        });
+
+        // Mark features as 'primary' if they are the largest of their type
+        Object.values(largestFeatures).forEach(item => {
+            item.feature.properties.isLargest = true;
+        });
+
         // Add to map with styling
         const layer = L.geoJSON(finalGeoJSON, {
             style: (feature) => getChangeFeatureStyle(feature),
             onEachFeature: (feature, layer) => {
                 const props = feature.properties;
+                const isLargest = !!props.isLargest;
 
                 // Create tooltip content
                 let tooltipContent = `
@@ -817,8 +838,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 `;
 
                 layer.bindTooltip(tooltipContent, {
-                    permanent: true,
-                    sticky: false,
+                    permanent: isLargest, // Only show permanently for the largest polygon of this type
+                    sticky: !isLargest,   // Show on hover for others
                     className: 'custom-tooltip',
                     direction: 'center',
                     opacity: 0.9
