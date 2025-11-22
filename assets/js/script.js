@@ -329,6 +329,16 @@ document.addEventListener('DOMContentLoaded', () => {
             if (matches && featureLayer.bringToFront) {
                 featureLayer.bringToFront();
             }
+
+            // Manage tooltip visibility: Show only for the selected category (if it's the largest polygon)
+            // Hide all others
+            if (matches) {
+                if (feature.properties.isLargest) {
+                    featureLayer.openTooltip();
+                }
+            } else {
+                featureLayer.closeTooltip();
+            }
         });
     }
 
@@ -336,6 +346,13 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!state.change.layer) return;
         state.change.layer.eachLayer(featureLayer => {
             featureLayer.setStyle(getChangeFeatureStyle(featureLayer.feature));
+
+            // Restore default tooltip state: Show only for the largest polygon of each type
+            if (featureLayer.feature.properties.isLargest) {
+                featureLayer.openTooltip();
+            } else {
+                featureLayer.closeTooltip();
+            }
         });
     }
 
