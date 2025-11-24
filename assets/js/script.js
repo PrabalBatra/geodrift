@@ -1,6 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
     // --- Map Initialization ---
-    const mapOptions = { zoomControl: false, attributionControl: true, preferCanvas: true };
+    const mapOptions = { zoomControl: false, attributionControl: true, preferCanvas: true, zoomSnap: 0.1, zoomDelta: 0.1 };
     const mapBefore = L.map('map-before', mapOptions).setView([20, 0], 2);
     const mapAfter = L.map('map-after', mapOptions).setView([20, 0], 2);
     let mapChange = null; // Will be initialized when needed
@@ -27,8 +27,48 @@ document.addEventListener('DOMContentLoaded', () => {
     let afterTileLayer = L.tileLayer(basemapLayers.dark.url, { attribution: basemapLayers.dark.attribution }).addTo(mapAfter);
     let changeTileLayer = null;
 
+    // --- Custom Zoom Display Control ---
+    const ZoomDisplay = L.Control.extend({
+        onAdd: function (map) {
+            const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control zoom-display');
+            container.style.cssText = 'background: rgba(30, 41, 59, 0.9); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.2); padding: 5px 10px; color: #f8fafc; font-family: "Outfit", sans-serif; font-size: 14px; display: flex; align-items: center; gap: 5px; border-radius: 4px;';
+
+            const label = L.DomUtil.create('span', '', container);
+            label.textContent = 'Zoom:';
+            label.style.fontWeight = '600';
+            label.style.color = '#818cf8';
+
+            this._input = L.DomUtil.create('input', 'zoom-input', container);
+            this._input.type = 'number';
+            this._input.step = '0.1';
+            this._input.min = '0';
+            this._input.max = '22';
+            this._input.style.cssText = 'width: 50px; background: rgba(0, 0, 0, 0.2); border: 1px solid rgba(255, 255, 255, 0.1); color: #fff; padding: 2px 5px; border-radius: 4px; font-family: inherit; font-size: inherit; text-align: center;';
+            this._input.value = map.getZoom().toFixed(1);
+
+            L.DomEvent.disableClickPropagation(container);
+            L.DomEvent.disableScrollPropagation(container);
+
+            L.DomEvent.on(this._input, 'change', () => {
+                const val = parseFloat(this._input.value);
+                if (!isNaN(val)) {
+                    map.setZoom(val);
+                }
+            });
+
+            map.on('zoomend', () => {
+                this._input.value = map.getZoom().toFixed(1);
+            });
+
+            return container;
+        }
+    });
+
     L.control.zoom({ position: 'bottomright' }).addTo(mapBefore);
+    new ZoomDisplay({ position: 'bottomright' }).addTo(mapBefore);
+
     L.control.zoom({ position: 'bottomright' }).addTo(mapAfter);
+    new ZoomDisplay({ position: 'bottomright' }).addTo(mapAfter);
 
     // Add scale controls to main maps (standard Leaflet scale)
     L.control.scale({
@@ -814,6 +854,7 @@ document.addEventListener('DOMContentLoaded', () => {
             changeTileLayer = L.tileLayer(currentBasemapConfig.url, { attribution: currentBasemapConfig.attribution });
             changeTileLayer.addTo(mapChange);
             L.control.zoom({ position: 'bottomright' }).addTo(mapChange);
+            new ZoomDisplay({ position: 'bottomright' }).addTo(mapChange);
 
             // Add scale control to change map
             L.control.scale({
@@ -2372,13 +2413,10 @@ document.addEventListener('DOMContentLoaded', () => {
         mapContainer.appendChild(legendDiv);
 
         try {
-            // Ensure map knows its size and fits bounds tightly
+            // Ensure map knows its size
             if (state.change.layer && state.change.map) {
                 state.change.map.invalidateSize();
-                state.change.map.fitBounds(state.change.layer.getBounds(), {
-                    padding: [20, 20], // Minimal padding
-                    animate: false
-                });
+                // Removed auto-fitBounds to respect user's current zoom level
 
                 // Wait for tiles to load and render
                 await new Promise(resolve => setTimeout(resolve, 1000));
