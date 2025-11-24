@@ -1,6 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
     // --- Map Initialization ---
-    const mapOptions = { zoomControl: false, attributionControl: true };
+    const mapOptions = { zoomControl: false, attributionControl: true, preferCanvas: true };
     const mapBefore = L.map('map-before', mapOptions).setView([20, 0], 2);
     const mapAfter = L.map('map-after', mapOptions).setView([20, 0], 2);
     let mapChange = null; // Will be initialized when needed
@@ -148,6 +148,13 @@ document.addEventListener('DOMContentLoaded', () => {
         layerOptions.forEach(option => {
             option.classList.toggle('active', option.dataset.layer === layerType);
         });
+
+        // Toggle light mode class on body
+        if (layerType === 'light') {
+            document.body.classList.add('light-mode');
+        } else {
+            document.body.classList.remove('light-mode');
+        }
     }
 
     // --- Legend ---
@@ -553,10 +560,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const afterValues = getDistinctValues(state.after.geojson, attribute);
         const allValues = [...new Set([...beforeValues, ...afterValues])];
 
-        if (allValues.length > 100) {
-            alert(`Too many distinct values (${allValues.length}). Please select an attribute with less than 100 unique values.`);
-            return;
-        }
+
 
         state.colorMap = createColorMap(allValues);
         state.selectedAttribute = attribute;
@@ -637,12 +641,88 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log('Before features:', beforeGeoJSON.features.length);
         console.log('After features:', afterGeoJSON.features.length);
 
+        // --- Optimization: Spatial Indexing ---
+        // 1. Pre-calculate bboxes for 'after' features to avoid repeated calculations
+        const afterFeaturesWithBBox = afterGeoJSON.features.map(f => ({
+            feature: f,
+            bbox: turf.bbox(f)
+        }));
+
+        // 2. Create a simple grid index
+        // Determine global bounds of 'after' layer
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        afterFeaturesWithBBox.forEach(item => {
+            const b = item.bbox;
+            if (b[0] < minX) minX = b[0];
+            if (b[1] < minY) minY = b[1];
+            if (b[2] > maxX) maxX = b[2];
+            if (b[3] > maxY) maxY = b[3];
+        });
+
+        // Heuristic for grid size: sqrt(N) usually works well, clamped to reasonable limits
+        const gridSize = Math.max(5, Math.min(100, Math.ceil(Math.sqrt(afterFeaturesWithBBox.length))));
+        const cellWidth = (maxX - minX) / gridSize || 1; // Prevent division by zero
+        const cellHeight = (maxY - minY) / gridSize || 1;
+
+        const grid = new Map();
+
+        // Helper to get grid keys for a bbox
+        const getGridKeys = (bbox) => {
+            const startX = Math.floor((bbox[0] - minX) / cellWidth);
+            const endX = Math.floor((bbox[2] - minX) / cellWidth);
+            const startY = Math.floor((bbox[1] - minY) / cellHeight);
+            const endY = Math.floor((bbox[3] - minY) / cellHeight);
+
+            const keys = [];
+            // Clamp indices to grid bounds
+            const sX = Math.max(0, Math.min(startX, gridSize - 1));
+            const eX = Math.max(0, Math.min(endX, gridSize - 1));
+            const sY = Math.max(0, Math.min(startY, gridSize - 1));
+            const eY = Math.max(0, Math.min(endY, gridSize - 1));
+
+            for (let x = sX; x <= eX; x++) {
+                for (let y = sY; y <= eY; y++) {
+                    keys.push(`${x},${y}`);
+                }
+            }
+            return keys;
+        };
+
+        // Populate grid
+        afterFeaturesWithBBox.forEach(item => {
+            const keys = getGridKeys(item.bbox);
+            keys.forEach(key => {
+                if (!grid.has(key)) grid.set(key, []);
+                grid.get(key).push(item);
+            });
+        });
+
         // Process each feature from the "before" dataset
         beforeGeoJSON.features.forEach((beforeFeature, idx) => {
             const beforeValue = beforeFeature.properties[attribute];
+            const beforeBBox = turf.bbox(beforeFeature);
 
-            // Find intersecting features in "after" dataset
-            afterGeoJSON.features.forEach((afterFeature) => {
+            // Get candidates from grid
+            const gridKeys = getGridKeys(beforeBBox);
+            const candidates = new Set();
+            gridKeys.forEach(key => {
+                const cellItems = grid.get(key);
+                if (cellItems) {
+                    cellItems.forEach(item => candidates.add(item));
+                }
+            });
+
+            // Iterate over candidates
+            candidates.forEach((afterItem) => {
+                const afterFeature = afterItem.feature;
+                const afterBBox = afterItem.bbox;
+
+                // Fast BBox overlap check
+                if (beforeBBox[2] < afterBBox[0] || beforeBBox[0] > afterBBox[2] ||
+                    beforeBBox[3] < afterBBox[1] || beforeBBox[1] > afterBBox[3]) {
+                    return; // No overlap
+                }
+
                 const afterValue = afterFeature.properties[attribute];
 
                 try {
@@ -846,24 +926,35 @@ document.addEventListener('DOMContentLoaded', () => {
                 const props = feature.properties;
                 const isLargest = !!props.isLargest;
 
-                // Create tooltip content
-                let tooltipContent = `
+                // Create popup content
+                let popupContent = `
                     <div class="tooltip-row"><strong>Before:</strong> ${props.before_value}</div>
                     <div class="tooltip-row"><strong>After:</strong> ${props.after_value}</div>
                     <div class="tooltip-row"><strong>Status:</strong> <span style="color: ${props.status === 'changed' ? '#f59e0b' : '#10b981'}">${props.status === 'changed' ? 'Changed' : 'Unchanged'}</span></div>
                     <div class="tooltip-row"><strong>Area:</strong> ${formatArea(props.area_m2)}</div>
                 `;
 
-                layer.bindTooltip(tooltipContent, {
-                    permanent: isLargest, // Only show permanently for the largest polygon of this type
-                    sticky: !isLargest,   // Show on hover for others
-                    className: 'custom-tooltip',
-                    direction: 'center',
-                    opacity: 0.9
+                layer.bindPopup(popupContent, {
+                    className: 'custom-popup'
                 });
 
-                // Hover interaction
-                layer.on('mouseover', (e) => {
+                // Restore static tooltip for the largest feature of each type
+                if (isLargest) {
+                    layer.bindTooltip(popupContent, {
+                        permanent: true,
+                        direction: 'center',
+                        className: 'custom-tooltip',
+                        opacity: 0.9
+                    });
+                }
+
+                // Click interaction for highlighting
+                layer.on('click', (e) => {
+                    // Reset all other layers first (optional, but good for clean UI)
+                    if (state.change.layer) {
+                        state.change.layer.resetStyle();
+                    }
+
                     const layer = e.target;
 
                     // Highlight style
@@ -873,12 +964,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         fillOpacity: 0.9
                     });
                     layer.bringToFront();
-                });
-
-                layer.on('mouseout', (e) => {
-                    // Reset style to default
-                    const layer = e.target;
-                    layer.setStyle(getChangeFeatureStyle(feature));
+                    layer.openPopup();
                 });
             }
         }).addTo(mapChange);
