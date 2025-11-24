@@ -482,7 +482,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const content = document.getElementById('legend-content');
         const header = panel.querySelector('.legend-header h3');
 
-        header.textContent = 'Change Legend';
+        const beforeYear = state.before.year || 'Before';
+        const afterYear = state.after.year || 'After';
+        header.innerHTML = `Change Legend <span style="font-size: 0.8em; color: var(--text-muted); font-weight: normal;">(${beforeYear} → ${afterYear})</span>`;
+
         content.innerHTML = '';
 
         const viewAllItem = createViewAllLegendItem(LEGEND_MODES.CHANGE);
@@ -949,28 +952,48 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
 
                 // Click interaction for highlighting
+                // Click interaction for highlighting
                 layer.on('click', (e) => {
-                    // Reset all other layers first (optional, but good for clean UI)
+                    L.DomEvent.stopPropagation(e); // Stop map click event
+
+                    const clickedLayer = e.target;
+
+                    // Reset all other layers first
                     if (state.change.layer) {
                         state.change.layer.resetStyle();
+                        state.change.layer.eachLayer(l => {
+                            l.closeTooltip();
+                            l.closePopup();
+                        });
                     }
 
-                    const layer = e.target;
-
-                    // Highlight style
-                    layer.setStyle({
+                    // Highlight clicked layer
+                    clickedLayer.setStyle({
                         weight: 3,
                         color: '#fff',
                         fillOpacity: 0.9
                     });
-                    layer.bringToFront();
-                    layer.openPopup();
+                    clickedLayer.bringToFront();
+                    clickedLayer.openPopup();
                 });
             }
         }).addTo(mapChange);
 
-        // Remove the map click handler that hides the panel to allow persistent viewing of last hovered item
-        // mapChange.on('click', () => { ... });
+        // Reset selection on map click (restore static tooltips)
+        mapChange.off('click');
+        mapChange.on('click', () => {
+            if (state.change.layer) {
+                state.change.layer.resetStyle();
+                state.change.layer.eachLayer(l => {
+                    l.closePopup();
+                    if (l.feature.properties.isLargest) {
+                        l.openTooltip();
+                    } else {
+                        l.closeTooltip();
+                    }
+                });
+            }
+        });
 
         state.change.layer = layer;
 
@@ -2288,14 +2311,84 @@ document.addEventListener('DOMContentLoaded', () => {
         downloadMapBtn.disabled = true;
         downloadMapBtn.innerHTML = '<span class="material-icons-round spin">sync</span>';
 
+        // 1. Hide Tooltips (Text on Polygon)
+        if (state.change.layer) {
+            state.change.layer.eachLayer(l => {
+                l.closeTooltip();
+            });
+        }
+
+        // 2. Create Legend for Image
+        const legendDiv = document.createElement('div');
+        legendDiv.style.cssText = `
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(30, 41, 59, 0.95);
+            color: #f8fafc;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            z-index: 9999;
+            font-family: 'Outfit', sans-serif;
+            width: auto;
+            max-width: 400px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(5px);
+        `;
+
+        const beforeYear = state.before.year || 'Before';
+        const afterYear = state.after.year || 'After';
+        const legendTitle = `Change Analysis Legend <span style="color: #94a3b8; font-weight: normal; font-size: 12px;">(${beforeYear} → ${afterYear})</span>`;
+
+        let legendHTML = `<h4 style="margin: 0 0 10px 0; font-size: 14px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 5px; color: #818cf8;">${legendTitle}</h4>`;
+
+        // Add Unchanged
+        legendHTML += `
+            <div style="display: flex; align-items: center; margin-bottom: 8px; font-size: 12px;">
+                <span style="width: 15px; height: 15px; background: #10b981; margin-right: 8px; border-radius: 3px; border: 1px solid rgba(255,255,255,0.3); flex-shrink: 0;"></span>
+                <span style="white-space: nowrap;">Unchanged</span>
+            </div>
+        `;
+
+        // Add Transitions
+        if (state.changeResults.changeMatrix) {
+            state.changeResults.changeMatrix.forEach(change => {
+                const transition = `${change.from} → ${change.to}`;
+                const color = state.transitionColorMap[transition] || '#f59e0b';
+                const areaHa = (change.area / 10000).toFixed(2);
+
+                legendHTML += `
+                    <div style="display: flex; align-items: center; margin-bottom: 8px; font-size: 12px;">
+                        <span style="width: 15px; height: 15px; background: ${color}; margin-right: 8px; border-radius: 3px; border: 1px solid rgba(255,255,255,0.3); flex-shrink: 0;"></span>
+                        <span style="line-height: 1.4; white-space: nowrap;">${transition} <span style="color: #94a3b8;">(${areaHa} ha)</span></span>
+                    </div>
+                 `;
+            });
+        }
+
+        legendDiv.innerHTML = legendHTML;
+        const mapContainer = document.getElementById('map-change');
+        mapContainer.appendChild(legendDiv);
+
         try {
-            const mapContainer = document.getElementById('map-change');
+            // Ensure map knows its size and fits bounds tightly
+            if (state.change.layer && state.change.map) {
+                state.change.map.invalidateSize();
+                state.change.map.fitBounds(state.change.layer.getBounds(), {
+                    padding: [20, 20], // Minimal padding
+                    animate: false
+                });
+
+                // Wait for tiles to load and render
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
 
             // Hide controls
             const controls = mapContainer.querySelector('.leaflet-control-container');
             if (controls) controls.style.display = 'none';
 
-            // Use dom-to-image which handles Leaflet transforms better
+            // Use dom-to-image
             const dataUrl = await domtoimage.toPng(mapContainer, {
                 width: mapContainer.offsetWidth,
                 height: mapContainer.offsetHeight,
@@ -2321,6 +2414,20 @@ document.addEventListener('DOMContentLoaded', () => {
             const controls = document.getElementById('map-change').querySelector('.leaflet-control-container');
             if (controls) controls.style.display = '';
         } finally {
+            // Remove Legend
+            if (legendDiv.parentNode) {
+                legendDiv.parentNode.removeChild(legendDiv);
+            }
+
+            // Restore Tooltips
+            if (state.change.layer) {
+                state.change.layer.eachLayer(l => {
+                    if (l.feature.properties.isLargest) {
+                        l.openTooltip();
+                    }
+                });
+            }
+
             downloadMapBtn.disabled = false;
             downloadMapBtn.innerHTML = originalContent;
         }
@@ -2430,6 +2537,22 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!file.name.endsWith('.zip')) {
             alert('Please upload a .zip file containing the shapefile components.');
             return;
+        }
+
+        // Extract year from filename
+        let year = null;
+        if (file.name.includes('16')) year = '2016';
+        else if (file.name.includes('22')) year = '2022';
+        else if (file.name.includes('24')) year = '2024';
+
+        state[key].year = year;
+
+        // Update UI Header
+        const paneId = key === 'before' ? 'pane-before' : 'pane-after';
+        const header = document.querySelector(`#${paneId} .upload-overlay h2`);
+        if (header) {
+            const baseTitle = key === 'before' ? 'Before State' : 'After State';
+            header.textContent = year ? `${baseTitle} (${year})` : baseTitle;
         }
 
         const zone = dropZones[key];
